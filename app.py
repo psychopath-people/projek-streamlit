@@ -1,155 +1,70 @@
+import streamlit as st
 import pandas as pd
 
-# ─────────────────────────────────────────────
-# SESI 1 — Buka dan Intip
-# ─────────────────────────────────────────────
-print("=" * 55)
-print("SESI 1 — Buka dan Intip")
-print("=" * 55)
+st.title("Dashboard Analisis Penjualan")
 
-df = pd.read_csv("Test.csv", low_memory=False, on_bad_lines="skip")
-df.columns = [c.rstrip(";") for c in df.columns]  # bersihkan sisa karakter rusak di nama kolom
-print(f"\nUkuran data: {df.shape[0]} baris, {df.shape[1]} kolom\n")
-df.info()
-print("\nDaftar kolom:")
-print(list(df.columns))
+uploaded = st.file_uploader("Upload CSV", type="csv")
 
-# ─────────────────────────────────────────────
-# SESI 2 — Kenali Isinya
-# ─────────────────────────────────────────────
-print("\n" + "=" * 55)
-print("SESI 2 — Kenali Isinya")
-print("=" * 55)
+if uploaded:
+    df = pd.read_csv(uploaded, low_memory=False, on_bad_lines="skip")
+    df.columns = [c.rstrip(";") for c in df.columns]
 
-print("\nMerek yang ada:")
-print(df["Brandname"].unique())
+    st.header("Sesi 1 — Info Data")
+    st.write(f"Ukuran: **{df.shape[0]} baris, {df.shape[1]} kolom**")
+    st.write("Daftar kolom:", list(df.columns))
 
-print(f"\nJumlah kota unik: {df['Kota'].nunique()}")
+    st.header("Sesi 2 — Kenali Isinya")
+    if "Brandname" in df.columns:
+        st.write("Merek:", df["Brandname"].unique().tolist())
+    if "Kota" in df.columns:
+        st.write(f"Jumlah kota unik: {df['Kota'].nunique()}")
+    if "Salesman" in df.columns:
+        st.write("Top 10 Salesman:")
+        st.dataframe(df["Salesman"].value_counts().head(10))
+    if "Business Type" in df.columns:
+        st.write("Komposisi Tipe Pelanggan:")
+        st.dataframe(df["Business Type"].value_counts())
 
-print("\nTop 10 Salesman:")
-print(df["Salesman"].value_counts().head(10))
+    st.header("Sesi 3 — Filter Data")
+    if "Kota" in df.columns and "Qty" in df.columns:
+        col1, col2 = st.columns(2)
+        with col1:
+            kota_filter = st.selectbox("Pilih Kota", ["(Semua)"] + sorted(df["Kota"].dropna().unique().tolist()))
+        with col2:
+            brand_filter = st.selectbox("Pilih Brand", ["(Semua)"] + sorted(df["Brandname"].dropna().unique().tolist()) if "Brandname" in df.columns else ["(Semua)"])
 
-print("\nKomposisi Tipe Pelanggan:")
-print(df["Business Type"].value_counts())
+        filtered = df.copy()
+        if kota_filter != "(Semua)":
+            filtered = filtered[filtered["Kota"] == kota_filter]
+        if brand_filter != "(Semua)" and "Brandname" in df.columns:
+            filtered = filtered[filtered["Brandname"] == brand_filter]
 
-# ─────────────────────────────────────────────
-# SESI 3 — Saring Baris
-# ─────────────────────────────────────────────
-print("\n" + "=" * 55)
-print("SESI 3 — Saring Baris")
-print("=" * 55)
+        st.write(f"Hasil filter: **{len(filtered)} baris**")
+        preview_cols = [c for c in ["N. Customer", "Kota", "Brandname", "Qty", "Total"] if c in filtered.columns]
+        st.dataframe(filtered[preview_cols].head(20))
 
-surabaya = df[df["Kota"] == "SURABAYA"]
-print(f"\nTransaksi di Surabaya: {len(surabaya)} baris")
+    st.header("Sesi 4 — Konversi Tipe Data")
+    kolom_angka = [k for k in ["Qty", "Harga", "Rupiah", "Total", "Tax"] if k in df.columns]
+    for k in kolom_angka:
+        df[k] = pd.to_numeric(df[k].astype(str).str.replace(",", ""), errors="coerce")
 
-foxled = df[df["Brandname"] == "FOXLED"]
-print(f"Transaksi FOXLED: {len(foxled)} baris")
+    if "Tanggal" in df.columns:
+        df["Tanggal"] = pd.to_datetime(df["Tanggal"], format="mixed", dayfirst=True, errors="coerce")
 
-# Qty terbaca sebagai teks — konversi dulu sebelum pakai operator >
-qty = pd.to_numeric(df["Qty"], errors="coerce")
-bali_jual = df[(df["Kota"] == "BALI") & (qty > 0)]
-print(f"Penjualan di Bali (Qty > 0): {len(bali_jual)} baris")
+    st.write("Null per kolom:")
+    st.dataframe(df.isnull().sum().rename("Null Count"))
 
-print("\nSampel 10 baris (kolom pilihan):")
-print(df[["N. Customer", "Kota", "Brandname", "Qty", "Total"]].head(10))
+    st.header("Sesi 5 — Penjualan vs Retur")
+    if "Qty" in df.columns:
+        jual  = df[df["Qty"] > 0]
+        retur = df[df["Qty"] < 0]
+        st.metric("Baris Penjualan", len(jual))
+        st.metric("Baris Retur", len(retur))
+        if "Total" in df.columns:
+            st.metric("Total Nilai Retur", f"Rp {retur['Total'].sum():,.0f}")
 
-# ─────────────────────────────────────────────
-# SESI 4 — Perbaiki Tipe Data (Angka)
-# ─────────────────────────────────────────────
-print("\n" + "=" * 55)
-print("SESI 4 — Perbaiki Tipe Data (Angka & Tanggal)")
-print("=" * 55)
+    csv_out = df.to_csv(index=False).encode("utf-8")
+    st.download_button("Download Data Bersih", csv_out, "penjualan_bersih.csv", "text/csv")
 
-kolom_angka = ["Qty", "Harga", "Rupiah", "Total", "Tax"]
-
-for k in kolom_angka:
-    df[k] = pd.to_numeric(
-        df[k].astype(str).str.replace(",", ""),
-        errors="coerce"
-    )
-
-# Data punya 2 format tanggal: '05/01/2026' dan '31 Aug 2026'
-# format='mixed' + dayfirst=True menangani keduanya sekaligus
-df["Tanggal"] = pd.to_datetime(
-    df["Tanggal"], format="mixed", dayfirst=True, errors="coerce"
-)
-
-print("\nInfo setelah konversi:")
-df.info()
-
-print("\nJumlah nilai kosong per kolom:")
-print(df.isnull().sum())
-
-# ─────────────────────────────────────────────
-# SESI 4b — Tanggal Berantakan (Mixed Date Format)
-# ─────────────────────────────────────────────
-print("\n" + "=" * 55)
-print("SESI 4b — Tanggal Berantakan")
-print("=" * 55)
-
-# Simulasi data tanggal campur format
-contoh_tanggal = pd.Series([
-    "05/01/2026",       # dd/mm/yyyy
-    "2026-01-06",       # yyyy-mm-dd (ISO)
-    "January 7, 2026",  # format teks
-    "08-Jan-26",        # format pendek
-    "99/99/9999",       # tidak valid
-    "",                 # kosong
-    None,               # NaN
-    "12/01/2026",       # normal
-])
-
-print("\nData mentah:")
-print(contoh_tanggal)
-
-# Cara salah — strict format
-print("\n--- Cara SALAH (strict format) ---")
-try:
-    pd.to_datetime(contoh_tanggal, format="%d/%m/%Y")
-except Exception as e:
-    print(f"ERROR: {e}")
-
-# Cara BERBAHAYA — tidak crash tapi tanggal Indonesia terbalik diam-diam!
-print("\n--- Cara BERBAHAYA (tanpa dayfirst) ---")
-hasil_salah = pd.to_datetime(contoh_tanggal, errors="coerce")
-print(hasil_salah)
-print(f"\n05/01/2026 terbaca: {hasil_salah[0]} ← harusnya 5 Januari, bukan 1 Mei!")
-
-# Cara AMAN — format='mixed' + dayfirst=True + errors='coerce'
-print("\n--- Cara AMAN (format='mixed', dayfirst=True) ---")
-hasil_aman = pd.to_datetime(contoh_tanggal, format="mixed", dayfirst=True, errors="coerce")
-print(hasil_aman)
-
-# Deteksi baris yang masih gagal
-gagal = contoh_tanggal[hasil_aman.isna()]
-print(f"\nBaris tidak bisa dikonversi: {gagal.count()}")
-print(gagal)
-
-# Terapkan ke data asli
-print(f"\nBaris kosong di kolom Tanggal (data asli): {df['Tanggal'].isna().sum()}")
-df["Tanggal"] = pd.to_datetime(df["Tanggal"], format="mixed", dayfirst=True, errors="coerce")
-rusak = df[df["Tanggal"].isna()]
-print(f"Baris tanggal bermasalah setelah konversi: {len(rusak)}")
-
-# ─────────────────────────────────────────────
-# SESI 5 — Pisahkan, Buang, Simpan
-# ─────────────────────────────────────────────
-print("\n" + "=" * 55)
-print("SESI 5 — Pisahkan, Buang, Simpan")
-print("=" * 55)
-
-jual  = df[df["Qty"] > 0]
-retur = df[df["Qty"] < 0]
-
-print(f"\nJumlah baris penjualan : {len(jual)}")
-print(f"Jumlah baris retur     : {len(retur)}")
-print(f"Total nilai retur      : Rp {retur['Total'].sum():,.0f}")
-
-kolom_buang = ["Sales", "Nama Barang", "unique_Kota"]
-df = df.drop(columns=kolom_buang)
-
-print(f"\nKolom tersisa ({len(df.columns)}):")
-print(list(df.columns))
-
-df.to_csv("penjualan_bersih.csv", index=False)
-print("\nFile 'penjualan_bersih.csv' berhasil disimpan.")
+else:
+    st.info("Upload file CSV untuk mulai analisis.")
